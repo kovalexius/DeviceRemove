@@ -1,14 +1,18 @@
-//
-// RemoveDriveByLetter.cpp by Uwe Sieber - [url]www.uwe-sieber.de[/url]
-//
-// Simple demonstration how to prepare a disk drive for save removal
-//
-// Works with removable and fixed drives under W2K, XP, W2K3, Vista
-//
-// Console application - expects the drive letter of the drive to remove as parameter
-//
-// you are free to use this code in your projects
-//
+/////////////////////////////////////////////////////////////////////////////////////////////////
+///
+/// Взято отсюда: https://www.cyberforum.ru/blogs/218284/blog627.html
+///
+/// RemoveDriveByLetter.cpp by Uwe Sieber - [url]www.uwe-sieber.de[/url]
+///
+/// Simple demonstration how to prepare a disk drive for save removal
+///
+/// Works with removable and fixed drives under W2K, XP, W2K3, Vista
+///
+/// Console application - expects the drive letter of the drive to remove as parameter
+///
+/// you are free to use this code in your projects
+///
+/////////////////////////////////////////////////////////////////////////////////////////////////
 
 
 //#include "stdafx.h"
@@ -144,12 +148,15 @@ DEVINST GetDrivesDevInstByDeviceNumber(long DeviceNumber, UINT DriveType, char* 
 
 	GUID* guid;
 
-	switch (DriveType) {
+	switch (DriveType)
+	{
 	case DRIVE_REMOVABLE:
-		if (IsFloppy) {
+		if (IsFloppy)
+		{
 			guid = (GUID*)&GUID_DEVINTERFACE_FLOPPY;
 		}
-		else {
+		else
+		{
 			guid = (GUID*)&GUID_DEVINTERFACE_DISK;
 		}
 		break;
