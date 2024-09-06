@@ -1,4 +1,11 @@
+###
+### И сюда посмотреть http://forum.oszone.net/nextoldesttothread-93961.html
+### и сюда https://otvet.mail.ru/question/42833829
+###
+
 cmake_minimum_required(VERSION 3.26)
+
+set(CMAKE_CXX_STANDARD 17)
 
 project(DeviceRemove)
 
@@ -45,5 +52,29 @@ target_link_libraries(RemoveDriveByLetter
 #	USBitc/Unit2.h
 #)
 
+###
+### checkusb by Дмитрий Болоцкий
+###
+add_executable(checkusb
+	checkusb/InputDevices.cpp
+	checkusb/InputDevices.h
+	checkusb/LinInputDevices.cpp
+	checkusb/main.cpp
+)
+target_link_libraries(checkusb  PRIVATE Setupapi)
 
-### � ���� ���������� http://forum.oszone.net/nextoldesttothread-93961.html
+###
+### SetDeviceEnabled
+###
+add_executable(SetDeviceEnabled
+	SetDeviceEnabled/SetDeviceEnabled.cpp
+)
+
+target_link_libraries(SetDeviceEnabled PRIVATE Setupapi)
+
+
+###
+### StorageControl lib
+###
+add_subdirectory(StorageControl)
+add_subdirectory(TestStorageControl)
