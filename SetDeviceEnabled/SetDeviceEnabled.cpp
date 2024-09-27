@@ -131,7 +131,6 @@ void SetDeviceEnabled(const GUID* _classGuid, std::string& _instanceId, bool _en
 	HDEVINFO diSetHandle = SetupDiGetClassDevsA(_classGuid, NULL, NULL, DIGCF_PRESENT
 		// | DIGCF_DEVICEINTERFACE 
 		 | DIGCF_ALLCLASSES
-
 	);
 	std::vector<SP_DEVINFO_DATA> diData = GetDeviceInfoData(diSetHandle);
 
@@ -148,7 +147,7 @@ void SetDeviceEnabled(const GUID* _classGuid, std::string& _instanceId, bool _en
 
 int main()
 {
-	std::string instanceId("USB\\VID_8564&PID_1000\\150N58JQ");
+	std::string instanceId("USB\\VID_8564&PID_1000\\CCYYMMDDHHMMSSXTHBWP");
 	//SetDeviceEnabled(&GUID_DEVINTERFACE_USB_DEVICE, instanceId, false);
 	SetDeviceEnabled(&GUID_DEVINTERFACE_USB_DEVICE, instanceId, true);
 	//SetDeviceEnabled(&GUID_DEVINTERFACE_DISK, instanceId, true);

@@ -117,10 +117,8 @@ void InputDevices::checkDevices()
                 break;
         }
 		// Получаем список USB устройств
-		//auto hDevInfo = SetupDiGetClassDevs(&GUID_DEVINTERFACE_DISK, nullptr, nullptr, DIGCF_PRESENT
 		HDEVINFO hDevInfo = SetupDiGetClassDevs(&GUID_DEVINTERFACE_USB_DEVICE, nullptr, nullptr, DIGCF_PRESENT 
 			| DIGCF_DEVICEINTERFACE
-			//| DIGCF_ALLCLASSES
 		);
         if (hDevInfo == INVALID_HANDLE_VALUE)
         {

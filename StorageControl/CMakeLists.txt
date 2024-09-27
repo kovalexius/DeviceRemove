@@ -3,11 +3,16 @@ project(StorageControl)
 add_library(StorageControl STATIC
 	./src/StorageControl.h
 	./src/StorageControlWindows.cpp
+	./src/StrWindows.cpp
+	./src/Str.h
+	./src/RaiiWrapper.cpp
+	./src/RaiiWrapper.h
 )
 
 if(WIN32)
 target_link_libraries(StorageControl PUBLIC
 	Setupapi
+	Cfgmgr32
 )
 endif()
 
