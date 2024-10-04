@@ -7,6 +7,8 @@ add_library(StorageControl STATIC
 	./src/Str.h
 	./src/RaiiWrapper.cpp
 	./src/RaiiWrapper.h
+	./src/Thread.h
+	./src/Event.h
 )
 
 if(WIN32)

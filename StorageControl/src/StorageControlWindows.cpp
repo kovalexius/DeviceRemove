@@ -34,14 +34,47 @@ namespace sudis::storage_control
 		return result;
 	}
 
+	std::string fromGuid(const GUID& _guid)
+	{
+		std::stringstream ss;
+		ss << std::setfill('0') << std::hex << std::uppercase <<
+			std::setfill('0') << std::setw(8) << _guid.Data1 << "-" <<
+			std::setfill('0') << std::setw(4) << _guid.Data2 << "-" <<
+			std::setfill('0') << std::setw(4) << _guid.Data3 << "-" <<
+			std::setfill('0') << std::setw(2) << (int)_guid.Data4[0] <<
+			std::setfill('0') << std::setw(2) << (int)_guid.Data4[1] << "-" <<
+			std::setfill('0') << std::setw(2) << (int)_guid.Data4[2] <<
+			std::setfill('0') << std::setw(2) << (int)_guid.Data4[3] <<
+			std::setfill('0') << std::setw(2) << (int)_guid.Data4[4] <<
+			std::setfill('0') << std::setw(2) << (int)_guid.Data4[5] <<
+			std::setfill('0') << std::setw(2) << (int)_guid.Data4[6] <<
+			std::setfill('0') << std::setw(2) << (int)_guid.Data4[7];
+
+		return ss.str();
+	}
 
 	/// 
 	/// @brief Получить список конечных устройств с USB разветлителя
 	/// @param _handle файл устройства разветвителя
-	/// @param _diData эта структура тут не используется, а просто сохраняется в случае пополнения списка _devList
 	/// 
-	void getDeviceFromPort(const UINT ports, const HANDLE _handle, const SP_DEVINFO_DATA& _diData, std::vector<Device>& _devList)
+	void getDeviceFromPort(const HANDLE _handle, std::vector<Device>& _devList)
 	{
+		// получаем число портов на концентраторе
+		USB_NODE_INFORMATION	nodeinfo{};
+		nodeinfo.NodeType = UsbHub;
+		DWORD bytes_read = 0;
+		if (!DeviceIoControl(_handle, IOCTL_USB_GET_NODE_INFORMATION,
+			&nodeinfo, sizeof(nodeinfo),
+			&nodeinfo, sizeof(nodeinfo),
+			&bytes_read, 0))
+		{
+			std::cerr << "Failed IOCTL_USB_GET_NODE_INFORMATION request by DeviceIoControl() errorCode: " << GetLastError() << std::endl;
+			return;
+		}
+
+		UINT ports = (UINT)nodeinfo.u.HubInformation.HubDescriptor.bNumberOfPorts;
+		std::cout << "Numbers of ports: " << ports << std::endl;
+
 		for (int j = 1; j <= ports; j++)
 		{
 			USB_NODE_CONNECTION_INFORMATION_EX coninfo = { 0 };
@@ -57,15 +90,24 @@ namespace sudis::storage_control
 			/// Под вопросом
 			if (coninfo.ConnectionStatus == 0)
 			{
-				std::cout << "Not connected port " << j <<  std::endl << std::endl;
+				//std::cout << "Not connected port " << j <<  std::endl << std::endl;
 				continue; //нет устройства
 			}
 
 			Device device;
 
-			std::cout << "Port " << j << 
-				": USB v" << std::hex << (int)coninfo.DeviceDescriptor.bcdUSB << std::dec << " device" << 
-				" connectionStatus: " << coninfo.ConnectionStatus << std::endl;
+			//std::cout << "Port " << j << 
+			//	": USB v" << std::hex << (int)coninfo.DeviceDescriptor.bcdUSB << std::dec << " device" << 
+			//	" connectionStatus: " << coninfo.ConnectionStatus << std::endl;
+
+			std::cout << std::endl << "bDescriptorType: " << (int)coninfo.DeviceDescriptor.bDescriptorType <<
+				" bcdUSB :" << coninfo.DeviceDescriptor.bcdUSB <<
+				" bDeviceClass: " << (int)coninfo.DeviceDescriptor.bDeviceClass <<
+				" bDeviceSubClass: " << (int)coninfo.DeviceDescriptor.bDeviceSubClass <<
+				" bDeviceProtocol: " << (int)coninfo.DeviceDescriptor.bDeviceProtocol <<
+				" bMaxPacketSize0: " << (int)coninfo.DeviceDescriptor.bMaxPacketSize0 <<
+				" bcdDevice: " << coninfo.DeviceDescriptor.bcdDevice << std::endl;
+
 			std::cout << "VID: " << std::hex << (int)coninfo.DeviceDescriptor.idVendor << " PID: " << (int)coninfo.DeviceDescriptor.idProduct << std::dec << std::endl;
 
 			device.m_vid = int_to_hex((int)coninfo.DeviceDescriptor.idVendor, 4);
@@ -75,7 +117,46 @@ namespace sudis::storage_control
 			char buffer[BUFSIZE] = { 0 };
 			USB_DESCRIPTOR_REQUEST* req = (USB_DESCRIPTOR_REQUEST*)&buffer;
 
+
+			///* Тест USB_DEVICE_DESCRIPTOR_TYPE */
+			ZeroMemory(buffer, BUFSIZE);
+			req->ConnectionIndex = j;
+			req->SetupPacket.wValue = (USB_DEVICE_DESCRIPTOR_TYPE << 8);
+			req->SetupPacket.wLength = BUFSIZE - sizeof(USB_DESCRIPTOR_REQUEST);
+			req->SetupPacket.wIndex = 0x409;			//US English
+			if (!DeviceIoControl(_handle, IOCTL_USB_GET_DESCRIPTOR_FROM_NODE_CONNECTION,
+				&buffer, sizeof(buffer), &buffer, sizeof(buffer), &bytes_read, 0))
+			{
+				std::cerr << "Failed USB_DEVICE_DESCRIPTOR_TYPE request by DeviceIoControl() from port: " << j << " errorCode: " << GetLastError() << std::endl;
+				continue;
+			}
+			USB_DEVICE_DESCRIPTOR* devDescr = (USB_DEVICE_DESCRIPTOR*)&req->Data[0];
+			std::cout << "bDescriptorType: " << (int)devDescr->bDescriptorType <<
+				" bcdUSB :" << devDescr->bcdUSB <<
+				" bDeviceClass: " << (int)devDescr->bDeviceClass <<
+				" bDeviceSubClass: " << (int)devDescr->bDeviceSubClass <<
+				" bDeviceProtocol: " << (int)devDescr->bDeviceProtocol <<
+				" bMaxPacketSize0: " << (int)devDescr->bMaxPacketSize0 <<
+				" idVendor: "		<< (int)devDescr->idVendor <<
+				" idProduct: "		<< (int)devDescr->idProduct <<
+				" bcdDevice: "		<< (int)devDescr->bcdDevice << 
+				" iManufacturer: "	<< (int)devDescr->iManufacturer <<
+				" iProduct: "		<< (int)devDescr->iProduct <<
+				" iSerialNumber: "	<< (int)devDescr->iSerialNumber <<
+				" bNumConfigurations: " << (int)devDescr->bNumConfigurations <<
+				std::endl;
+
+			/////* Тест IOCTL_DISK_GET_LENGTH_INFO 
+			//DeviceIoControl(_handle, 
+			//	IOCTL_DISK_GET_LENGTH_INFO,
+			//	NULL,
+			//	0,
+			//	0,
+
+
+
 			/*Serial number*/
+			ZeroMemory(buffer, BUFSIZE);
 			req->ConnectionIndex = j;
 			req->SetupPacket.wValue = (USB_STRING_DESCRIPTOR_TYPE << 8) + coninfo.DeviceDescriptor.iSerialNumber;
 			req->SetupPacket.wLength = BUFSIZE - sizeof(USB_DESCRIPTOR_REQUEST);
@@ -125,32 +206,30 @@ namespace sudis::storage_control
 			std::cout << "Vendor: " << sudis::base::ws_s(std::wstring(desc->bString)) << std::endl;
 			device.m_vendor = sudis::base::ws_s(std::wstring(desc->bString));
 
-			device.m_diData = _diData;
-
 			_devList.emplace_back(device);
 		}
 	}
 
 	StorageControl::StorageControl()
 	{
-		m_classGuid = &GUID_DEVINTERFACE_USB_HUB;
-
-		m_deviceInfoHandle = SetupDiGetClassDevsA(m_classGuid, 0, 0, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
-		if (m_deviceInfoHandle == INVALID_HANDLE_VALUE)
-		{
-			std::cerr << "Failed SetupDiGetClassDevsA(). errorCode: " << GetLastError() << std::endl;
-			throw std::runtime_error("Failed SetupDiGetClassDevsA().");
-		}
 	}
 
 	StorageControl::~StorageControl()
 	{
-		SetupDiDestroyDeviceInfoList(m_deviceInfoHandle);
 	}
 
 	std::pair<bool, std::vector<Device>> StorageControl::getDevices(bool _isBlocked)
 	{
 		std::vector<Device> result;
+
+		//const GUID* classGuid = &GUID_DEVINTERFACE_DISK;
+		const GUID*  classGuid = &GUID_DEVINTERFACE_USB_HUB;
+		sudis::base::HDevInfo deviceInfoHandle = SetupDiGetClassDevsA(classGuid, 0, 0, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
+		if (deviceInfoHandle.getRef() == INVALID_HANDLE_VALUE)
+		{
+			std::cerr << "Failed SetupDiGetClassDevsA(). errorCode: " << GetLastError() << std::endl;
+			throw std::runtime_error("Failed SetupDiGetClassDevsA().");
+		}
 
 		for (int deviceIndex = 0; ; deviceIndex++)
 		{
@@ -160,7 +239,7 @@ namespace sudis::storage_control
 			deviceInterface.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
 
 			// Перечисление
-			if (!SetupDiEnumDeviceInterfaces(m_deviceInfoHandle, 0, m_classGuid, deviceIndex, &deviceInterface))
+			if (!SetupDiEnumDeviceInterfaces(deviceInfoHandle.getRef(), 0, classGuid, deviceIndex, &deviceInterface))
 			{
 				std::cout << "End of enum by SetupDiEnumDeviceInterfaces(). errorCode: " << GetLastError() << std::endl;
 				break;
@@ -169,7 +248,7 @@ namespace sudis::storage_control
 			// Вычисление буфера
 			DWORD cbRequired = 0;
 			SetupDiGetDeviceInterfaceDetailA(
-				m_deviceInfoHandle,
+				deviceInfoHandle.getRef(),
 				&deviceInterface,
 				0,
 				0,
@@ -190,7 +269,7 @@ namespace sudis::storage_control
 
 			// Повторный вызов для возврата данных в буфер
 			if (!SetupDiGetDeviceInterfaceDetailA(
-				m_deviceInfoHandle,
+				deviceInfoHandle.getRef(),
 				&deviceInterface,
 				deviceInterfaceDetail,
 				cbRequired,
@@ -200,6 +279,9 @@ namespace sudis::storage_control
 				std::cerr << "Failed obtain SP_DEVICE_INTERFACE_DETAIL_DATA by SetupDiGetDeviceInterfaceDetailA(). errorCode: " << GetLastError() << std::endl;
 				continue;
 			}
+
+			//diData.
+
 
 			/*Открываем устройство для отправки IOCTL*/
 			HANDLE handle = CreateFile(deviceInterfaceDetail->DevicePath, GENERIC_WRITE, FILE_SHARE_WRITE,
@@ -211,34 +293,19 @@ namespace sudis::storage_control
 				continue;
 			}
 
-			// получаем число портов на концентраторе
-			USB_NODE_INFORMATION	nodeinfo {};
-			nodeinfo.NodeType = UsbHub;
-			DWORD bytes_read = 0;
-			if (!DeviceIoControl(handle, IOCTL_USB_GET_NODE_INFORMATION,
-				&nodeinfo, sizeof(nodeinfo), 
-				&nodeinfo, sizeof(nodeinfo), 
-				&bytes_read, 0))
-			{
-				std::cerr << "Failed IOCTL_USB_GET_NODE_INFORMATION request by DeviceIoControl() errorCode: " << GetLastError() << std::endl;
-				continue;
-			}
-
-			UINT ports = (UINT)nodeinfo.u.HubInformation.HubDescriptor.bNumberOfPorts;
-			std::cout << "Numbers of ports: " << ports << std::endl;
-			getDeviceFromPort(ports, handle, diData, result);
+			getDeviceFromPort(handle, result);
 		}
 
 		return { true, result };
 	}
 
-	bool getDiData(const HDEVINFO hDevInfo, const Device& _device, SP_DEVINFO_DATA& _out)
+	bool getDiData(const sudis::base::HDevInfo& hDevInfo, const Device& _device, SP_DEVINFO_DATA& _out)
 	{
 		for (DWORD index = 0; ; index++)
 		{
 			SP_DEVINFO_DATA devInfoData{0};
 			devInfoData.cbSize = sizeof(devInfoData);
-			if (!SetupDiEnumDeviceInfo(hDevInfo, index, &devInfoData))
+			if (!SetupDiEnumDeviceInfo(hDevInfo.getRef(), index, &devInfoData))
 			{
 				if (GetLastError() == ERROR_NO_MORE_ITEMS)
 					std::cout << "End of enum" << std::endl;
@@ -249,14 +316,14 @@ namespace sudis::storage_control
 			std::vector<char> sb(1, '\0');
 			DWORD requiredSize = 0;
 			// 1ый вызов чтобы расширить буфер
-			auto res = SetupDiGetDeviceInstanceIdA(hDevInfo, &devInfoData, sb.data(), sb.size(), &requiredSize);
+			auto res = SetupDiGetDeviceInstanceIdA(hDevInfo.getRef(), &devInfoData, sb.data(), sb.size(), &requiredSize);
 			if (res == FALSE)
 			{
 				if (GetLastError() == ERROR_INSUFFICIENT_BUFFER)
 				{
 					sb.resize(requiredSize);
 					// 2ой вызов - получение данных
-					res = SetupDiGetDeviceInstanceIdA(hDevInfo, &devInfoData, sb.data(), sb.size(), &requiredSize);
+					res = SetupDiGetDeviceInstanceIdA(hDevInfo.getRef(), &devInfoData, sb.data(), sb.size(), &requiredSize);
 				}
 				else
 				{
@@ -294,15 +361,14 @@ namespace sudis::storage_control
 		return false;
 	}
 
-	void StorageControl::enableDevice(const Device& _device, const bool _enable)
+	void enableDevice(const Device& _device, const bool _enable)
 	{
 		// Пробуем получить хендл XXX_USB_DEVICE а не XXX_USB_HUB
 		const GUID* pDevInterfaceGuid = &GUID_DEVINTERFACE_USB_DEVICE;
-		//const GUID* pDevInterfaceGuid = &_device.m_diData.ClassGuid;
-		HDEVINFO hDevInfo = SetupDiGetClassDevsA(pDevInterfaceGuid, NULL, NULL, DIGCF_PRESENT 
+		sudis::base::HDevInfo hDevInfo = SetupDiGetClassDevsA(pDevInterfaceGuid, NULL, NULL, DIGCF_PRESENT
 			//| DIGCF_DEVICEINTERFACE 
 			| DIGCF_ALLCLASSES);
-		if (hDevInfo == INVALID_HANDLE_VALUE)
+		if (hDevInfo.getRef() == INVALID_HANDLE_VALUE)
 		{
 			std::cerr << "Failed SetupDiGetClassDevsA(). errorCode: " << GetLastError() << std::endl;
 			return;
@@ -325,17 +391,14 @@ namespace sudis::storage_control
 		else
 			params.StateChange = DICS_DISABLE;
 
-		//SP_DEVINFO_DATA diData = _device.m_diData;
-		//auto result = SetupDiSetClassInstallParamsA(m_deviceInfoHandle, &diData, (PSP_CLASSINSTALL_HEADER)&params, sizeof(params));
-		auto result = SetupDiSetClassInstallParamsA(hDevInfo, &diData, (PSP_CLASSINSTALL_HEADER)&params, sizeof(params));
+		auto result = SetupDiSetClassInstallParamsA(hDevInfo.getRef(), &diData, (PSP_CLASSINSTALL_HEADER)&params, sizeof(params));
 		if (result == false)
 		{
 			std::cerr << "SetupDiSetClassInstallParamsA() failed. code: " << GetLastError() << std::endl;
 			return;
 		}
 
-		//result = SetupDiCallClassInstaller(DIF_PROPERTYCHANGE, m_deviceInfoHandle, &diData);
-		result = SetupDiCallClassInstaller(DIF_PROPERTYCHANGE, hDevInfo, &diData);
+		result = SetupDiCallClassInstaller(DIF_PROPERTYCHANGE, hDevInfo.getRef(), &diData);
 		if (result == false)
 		{
 			std::cerr << "SetupDiCallClassInstaller() failed. code: " << GetLastError() << std::endl;
@@ -355,37 +418,85 @@ namespace sudis::storage_control
 		return true;
 	}
 
-	DWORD NotifyCallBack(
+	DWORD NotifyNewDevices(
 		HCMNOTIFICATION       hNotify,
 		PVOID             Context,
 		CM_NOTIFY_ACTION      Action,
 		PCM_NOTIFY_EVENT_DATA EventData,
 		DWORD                 EventDataSize)
 	{
-		std::cout << __FUNCTION__ << std::endl;
+		std::cout << std::endl <<  __FUNCTION__ << std::endl;
+		std::cout << "Context: " << (char*)Context << std::endl;
+		std::cout << "Action: " << Action << std::endl;
+		std::cout << "EventDataSize: " << EventDataSize << std::endl;
+		std::cout << "EventGuid: " << fromGuid(EventData->u.DeviceHandle.EventGuid) << std::endl;
+		std::cout << "DataSize: " << EventData->u.DeviceHandle.DataSize << std::endl;
+		//std::cout << "Data: " << std::string((char*)&EventData->u.DeviceHandle.Data[0], EventData->u.DeviceHandle.DataSize) << std::endl;
+		std::cout << "NameOffset: " << EventData->u.DeviceHandle.NameOffset << std::endl;
+		std::cout << "ClassGuid: " << fromGuid(EventData->u.DeviceInterface.ClassGuid) << std::endl;
+		std::cout << "SymbolicLink: " << sudis::base::ws_s(EventData->u.DeviceInterface.SymbolicLink) << std::endl;
+		std::cout << "DeviceInstance: " << sudis::base::ws_s( EventData->u.DeviceInstance.InstanceId) << std::endl;
+		std::cout << "FilterType: " << EventData->FilterType << std::endl;
 
-		return 0;
+		return ERROR_SUCCESS;
 	}
 
-	void StorageControl::registerPlugEvent()
+	DWORD NotifyBlockedDevices(
+		HCMNOTIFICATION       hNotify,
+		PVOID             Context,
+		CM_NOTIFY_ACTION      Action,
+		PCM_NOTIFY_EVENT_DATA EventData,
+		DWORD                 EventDataSize)
 	{
-		//CM_NOTIFY_FILTER filter { 0 };
-		//filter.cbSize = sizeof(CM_NOTIFY_FILTER);
-		//filter.Flags = CM_NOTIFY_FILTER_FLAG_ALL_DEVICE_INSTANCES;
-		//filter.FilterType = CM_NOTIFY_FILTER_TYPE_DEVICEINTERFACE;
-		////filter.u.DeviceInterface.ClassGuid = GUID_DEVINTERFACE_USB_DEVICE;
+		GUID expectedGuid = { 0x00530055L, 0x0042, 0x005C, { 0x56, 0x00, 0x49, 0x00, 0x44, 0x00, 0x5F, 0x00 } };
 
+		if (EventData->u.DeviceInterface.ClassGuid == expectedGuid)
+		{
+			std::cout << std::endl << __FUNCTION__ << std::endl;
+			std::cout << "Context: " << (char*)Context << std::endl;
+			std::cout << "Action: " << Action << std::endl;
+			std::cout << "EventDataSize: " << EventDataSize << std::endl;
+			std::cout << "EventGuid: " << fromGuid(EventData->u.DeviceHandle.EventGuid) << std::endl;
+			std::cout << "DataSize: " << EventData->u.DeviceHandle.DataSize << std::endl;
+			//std::cout << "Data: " << std::string((char*)&EventData->u.DeviceHandle.Data[0], EventData->u.DeviceHandle.DataSize) << std::endl;
+			std::cout << "NameOffset: " << EventData->u.DeviceHandle.NameOffset << std::endl;
+			std::cout << "ClassGuid: " << fromGuid(EventData->u.DeviceInterface.ClassGuid) << std::endl;
+			std::cout << "SymbolicLink: " << sudis::base::ws_s(EventData->u.DeviceInterface.SymbolicLink) << std::endl;
+			std::cout << "DeviceInstance: " << sudis::base::ws_s(EventData->u.DeviceInstance.InstanceId) << std::endl;
+			std::cout << "FilterType: " << EventData->FilterType << std::endl;
+
+			HDEVINFO hDevInfo = SetupDiCreateDeviceInfoList(&EventData->u.DeviceInterface.ClassGuid, NULL);
+			if (INVALID_HANDLE_VALUE == hDevInfo)
+				std::cerr << "failed obtain hDevInfo" << std::endl;
+
+			SP_DEVINFO_DATA diData;
+			if (!SetupDiCreateDeviceInfoA(hDevInfo,
+				sudis::base::ws_s(EventData->u.DeviceInstance.InstanceId).c_str(),
+				&EventData->u.DeviceInterface.ClassGuid,
+				NULL,
+				NULL,
+				DICD_GENERATE_ID,
+				&diData))
+			{
+				std::cerr << "Failed obtain SP_DEVINFO_DATA. errorCode: " << GetLastError() << std::endl;
+			}
+		}
+
+		return ERROR_SUCCESS;
+	}
+
+	void registerNewDevicesEvent()
+	{
 		CM_NOTIFY_FILTER NotifyFilter = { 0 };
 		NotifyFilter.cbSize = sizeof(NotifyFilter);
 		NotifyFilter.FilterType = CM_NOTIFY_FILTER_TYPE_DEVICEINTERFACE;
 		NotifyFilter.u.DeviceInterface.ClassGuid = GUID_DEVINTERFACE_USB_DEVICE;
 
-		PCM_NOTIFY_CALLBACK callback = NotifyCallBack;
+		PCM_NOTIFY_CALLBACK callback = NotifyNewDevices;
 		HCMNOTIFICATION notifyContext;
 		auto res = CM_Register_Notification(
-			//&filter,
 			&NotifyFilter,
-			(PVOID)"Context",
+			(PVOID)"NewDevices",
 			callback,
 			&notifyContext);
 
@@ -395,6 +506,58 @@ namespace sudis::storage_control
 		{
 			std::cerr << "Failed register callback. errorCode: " << GetLastError() << " res: " << res << std::endl;
 		}
+	}
+
+	void registerBlockedDevicesEvent()
+	{
+		// GUID класса флешек
+		// {36fc9e60 - c465 - 11cf - 8056 - 444553540000}
+
+		CM_NOTIFY_FILTER NotifyFilter = { 0 };
+		NotifyFilter.cbSize = sizeof(NotifyFilter);
+		NotifyFilter.FilterType = CM_NOTIFY_FILTER_TYPE_DEVICEINSTANCE;
+		NotifyFilter.Flags = CM_NOTIFY_FILTER_FLAG_ALL_DEVICE_INSTANCES;
+
+		PCM_NOTIFY_CALLBACK callback = NotifyBlockedDevices;
+		HCMNOTIFICATION notifyContext;
+		auto res = CM_Register_Notification(
+			&NotifyFilter,
+			(PVOID)"Blocked Devices",
+			callback,
+			&notifyContext);
+
+		if (res == CR_SUCCESS)
+			std::cout << "Successing callback registered" << std::endl;
+		else
+		{
+			std::cerr << "Failed register callback. errorCode: " << GetLastError() << " res: " << res << std::endl;
+		}
+	}
+
+	void StorageControl::registerPlugEvent()
+	{
+		//registerNewDevicesEvent();
+		registerBlockedDevicesEvent();
+	}
+
+	void StorageControl::init()
+	{
+	}
+
+	void StorageControl::unInit()
+	{
+	}
+
+	uint32_t StorageControl::getSleepTimeout() const
+	{
+		return 100;
+	}
+
+
+	bool StorageControl::run()
+	{
+
+		return true;
 	}
 }
 

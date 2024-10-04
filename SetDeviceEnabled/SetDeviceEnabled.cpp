@@ -9,6 +9,8 @@
 #include <string>
 #include <stdexcept>
 #include <iostream>
+#include <iomanip>
+#include <sstream>
 
 #include <Windows.h>
 #include <SetupAPI.h>
@@ -48,6 +50,25 @@ struct PropertyChangeParameters
 	int HwProfile;
 };
 
+std::string fromGuid(const GUID& _guid)
+{
+	std::stringstream ss;
+	ss << std::setfill('0') << std::hex << std::uppercase <<
+		std::setfill('0') << std::setw(8) << _guid.Data1 << "-" <<
+		std::setfill('0') << std::setw(4) << _guid.Data2 << "-" <<
+		std::setfill('0') << std::setw(4) << _guid.Data3 << "-" <<
+		std::setfill('0') << std::setw(2) << (int)_guid.Data4[0] <<
+		std::setfill('0') << std::setw(2) << (int)_guid.Data4[1] << "-" <<
+		std::setfill('0') << std::setw(2) << (int)_guid.Data4[2] <<
+		std::setfill('0') << std::setw(2) << (int)_guid.Data4[3] <<
+		std::setfill('0') << std::setw(2) << (int)_guid.Data4[4] <<
+		std::setfill('0') << std::setw(2) << (int)_guid.Data4[5] <<
+		std::setfill('0') << std::setw(2) << (int)_guid.Data4[6] <<
+		std::setfill('0') << std::setw(2) << (int)_guid.Data4[7];
+
+	return ss.str();
+}
+
 std::vector<SP_DEVINFO_DATA> GetDeviceInfoData(const HDEVINFO _handle)
 {
 	std::vector<SP_DEVINFO_DATA> result;
@@ -57,7 +78,9 @@ std::vector<SP_DEVINFO_DATA> GetDeviceInfoData(const HDEVINFO _handle)
 		devInfoData.cbSize = sizeof(devInfoData);
 		if (!SetupDiEnumDeviceInfo(_handle, index, &devInfoData))
 		{
-			std::cout << "SetupDiEnumDeviceInfo() failed. code: " << GetLastError() << std::endl;
+			auto code = GetLastError();
+			if (code != ERROR_NO_MORE_ITEMS)
+				std::cerr << "SetupDiEnumDeviceInfo() failed. code: " << code << std::endl;
 			break;
 		}
 		result.push_back(devInfoData);
@@ -85,6 +108,9 @@ int GetIndexOfInstance(const HDEVINFO _handle, /*const */ std::vector<SP_DEVINFO
 
 		if (res == FALSE)
 			return -1;
+
+		std::cout << "Class GUID: " << fromGuid(_dataList[i].ClassGuid) <<
+			" DevInst: " << _dataList[i].DevInst << std::endl;
 
 		std::string sSb(sb.data());
 		std::cout << "instanceId: " << sSb << std::endl;
@@ -147,10 +173,15 @@ void SetDeviceEnabled(const GUID* _classGuid, std::string& _instanceId, bool _en
 
 int main()
 {
+	//std::string instanceId("USB\\Unknown123");
 	std::string instanceId("USB\\VID_8564&PID_1000\\CCYYMMDDHHMMSSXTHBWP");
 	//SetDeviceEnabled(&GUID_DEVINTERFACE_USB_DEVICE, instanceId, false);
-	SetDeviceEnabled(&GUID_DEVINTERFACE_USB_DEVICE, instanceId, true);
-	//SetDeviceEnabled(&GUID_DEVINTERFACE_DISK, instanceId, true);
+	
+	//std::cout << "USB:" << std::endl;
+	//SetDeviceEnabled(&GUID_DEVINTERFACE_USB_DEVICE, instanceId, true);
+	std::cout << std::endl << "DISK:" << std::endl;
+	SetDeviceEnabled(&GUID_DEVINTERFACE_DISK, instanceId, false);
+	
 
 	return 0;
 }

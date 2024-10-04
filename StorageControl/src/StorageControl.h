@@ -4,16 +4,14 @@
 #include <string>
 
 #include "RaiiWrapper.h"
-
-#ifdef _WIN32	// ѕотом это убрать
-#include <Windows.h>
-#include <SetupAPI.h>
-#endif
+#include "Thread.h"
 
 namespace sudis::storage_control
 {
 	struct Device
 	{
+		Device() : m_isBlocked(false)
+		{}
 		std::string m_vid;
 		std::string m_pid;
 		std::string m_serial;
@@ -21,18 +19,23 @@ namespace sudis::storage_control
 		std::string m_vendor;
 
 		bool m_isBlocked;	// ѕризнако блокировки
-#ifdef _WIN32	// ѕотом это убрать
-		SP_DEVINFO_DATA m_diData;
-#endif
 	};
 
-	class StorageControl
+	class StorageControl : sudis::base::Thread<StorageControl>
 	{
-#ifdef _WIN32	// ”брать это в детали реализации
-		HDEVINFO m_deviceInfoHandle;
-		const GUID* m_classGuid;
-		void enableDevice(const Device& _device, const bool _enable);
-#endif
+		/// \breaf выполн€етс€ в потоке перед началом основного цикла
+		void init() override;
+
+		/// \breaf выполн€етс€ в потоке после завершени€ основного цикла
+		void unInit() override;
+
+		/// \breaf врем€ ожидани€ между циклами
+		uint32_t getSleepTimeout() const override;
+
+		/// \breaf основной цикл выполн€емых операций
+		/// \return false, если необходимо сразу начинать следующий цикл, иначе - после таймаута
+		bool run() override;
+
 	public:
 		StorageControl();
 		~StorageControl();

@@ -44,6 +44,11 @@ namespace sudis::base
 			return m_handle;
 		}
 
+		const T& getRef() const
+		{
+			return m_handle;
+		}
+
 		/// @brief Вернуть значение хендла
 		T get() const
 		{
@@ -52,6 +57,11 @@ namespace sudis::base
 
 		/// @brief Прочитать или поменять значение хендла по указателю
 		T* getPtr()
+		{
+			return &m_handle;
+		}
+
+		const T* getPtr() const
 		{
 			return &m_handle;
 		}
