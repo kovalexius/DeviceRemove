@@ -56,7 +56,6 @@ namespace sudis::storage_control
 	/// 
 	/// @brief Получить список конечных устройств с USB разветлителя
 	/// @param _handle файл устройства разветвителя
-	/// 
 	void getDeviceFromPort(const HANDLE _handle, std::vector<Device>& _devList)
 	{
 		// получаем число портов на концентраторе
@@ -90,15 +89,10 @@ namespace sudis::storage_control
 			/// Под вопросом
 			if (coninfo.ConnectionStatus == 0)
 			{
-				//std::cout << "Not connected port " << j <<  std::endl << std::endl;
 				continue; //нет устройства
 			}
 
 			Device device;
-
-			//std::cout << "Port " << j << 
-			//	": USB v" << std::hex << (int)coninfo.DeviceDescriptor.bcdUSB << std::dec << " device" << 
-			//	" connectionStatus: " << coninfo.ConnectionStatus << std::endl;
 
 			std::cout << std::endl << "bDescriptorType: " << (int)coninfo.DeviceDescriptor.bDescriptorType <<
 				" bcdUSB :" << coninfo.DeviceDescriptor.bcdUSB <<
@@ -145,15 +139,6 @@ namespace sudis::storage_control
 				" iSerialNumber: "	<< (int)devDescr->iSerialNumber <<
 				" bNumConfigurations: " << (int)devDescr->bNumConfigurations <<
 				std::endl;
-
-			/////* Тест IOCTL_DISK_GET_LENGTH_INFO 
-			//DeviceIoControl(_handle, 
-			//	IOCTL_DISK_GET_LENGTH_INFO,
-			//	NULL,
-			//	0,
-			//	0,
-
-
 
 			/*Serial number*/
 			ZeroMemory(buffer, BUFSIZE);
@@ -218,83 +203,124 @@ namespace sudis::storage_control
 	{
 	}
 
-	std::pair<bool, std::vector<Device>> StorageControl::getDevices(bool _isBlocked)
+	std::pair<bool, std::vector<Device>> StorageControl::getDevices()
 	{
 		std::vector<Device> result;
 
-		//const GUID* classGuid = &GUID_DEVINTERFACE_DISK;
-		const GUID*  classGuid = &GUID_DEVINTERFACE_USB_HUB;
-		sudis::base::HDevInfo deviceInfoHandle = SetupDiGetClassDevsA(classGuid, 0, 0, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
-		if (deviceInfoHandle.getRef() == INVALID_HANDLE_VALUE)
 		{
-			std::cerr << "Failed SetupDiGetClassDevsA(). errorCode: " << GetLastError() << std::endl;
-			throw std::runtime_error("Failed SetupDiGetClassDevsA().");
+			const GUID* classGuid = &GUID_DEVINTERFACE_USB_HUB;
+			sudis::base::HDevInfo deviceInfoHandle = SetupDiGetClassDevsA(classGuid, 0, 0, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
+			if (deviceInfoHandle.getRef() == INVALID_HANDLE_VALUE)
+			{
+				std::cerr << "Failed SetupDiGetClassDevsA(). errorCode: " << GetLastError() << std::endl;
+				throw std::runtime_error("Failed SetupDiGetClassDevsA().");
+			}
+
+			for (int deviceIndex = 0; ; deviceIndex++)
+			{
+				std::cout << std::endl;
+
+				SP_DEVICE_INTERFACE_DATA deviceInterface = { 0 };
+				deviceInterface.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
+
+				// Перечисление
+				if (!SetupDiEnumDeviceInterfaces(deviceInfoHandle.getRef(), 0, classGuid, deviceIndex, &deviceInterface))
+				{
+					std::cout << "End of enum by SetupDiEnumDeviceInterfaces(). errorCode: " << GetLastError() << std::endl;
+					break;
+				}
+
+				// Вычисление буфера
+				DWORD cbRequired = 0;
+				SetupDiGetDeviceInterfaceDetailA(
+					deviceInfoHandle.getRef(),
+					&deviceInterface,
+					0,
+					0,
+					&cbRequired,
+					0);
+				if (ERROR_INSUFFICIENT_BUFFER != GetLastError())
+				{
+					std::cerr << "No ERROR_INSUFFICIENT_BUFFER errorCode:" << GetLastError() << std::endl;
+					continue;
+				}
+
+				std::vector<char> buffer(cbRequired, 0);
+				PSP_DEVICE_INTERFACE_DETAIL_DATA deviceInterfaceDetail =
+					(PSP_DEVICE_INTERFACE_DETAIL_DATA)buffer.data();
+				deviceInterfaceDetail->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA);
+				SP_DEVINFO_DATA diData;
+				diData.cbSize = sizeof(SP_DEVINFO_DATA);
+
+				// Повторный вызов для возврата данных в буфер
+				if (!SetupDiGetDeviceInterfaceDetailA(
+					deviceInfoHandle.getRef(),
+					&deviceInterface,
+					deviceInterfaceDetail,
+					cbRequired,
+					&cbRequired,
+					&diData))
+				{
+					std::cerr << "Failed obtain SP_DEVICE_INTERFACE_DETAIL_DATA by SetupDiGetDeviceInterfaceDetailA(). errorCode: " << GetLastError() << std::endl;
+					continue;
+				}
+
+
+				/*Открываем устройство для отправки IOCTL*/
+				HANDLE handle = CreateFile(deviceInterfaceDetail->DevicePath, GENERIC_WRITE, FILE_SHARE_WRITE,
+					0, OPEN_EXISTING, 0, 0);
+
+				if (handle == INVALID_HANDLE_VALUE)
+				{
+					std::cerr << "Failed CreateFile(). errorCode: " << GetLastError() << " continue." << std::endl;
+					continue;
+				}
+
+				getDeviceFromPort(handle, result);
+			}
 		}
 
-		for (int deviceIndex = 0; ; deviceIndex++)
+		/// Фильтрация по носителям информации
 		{
-			std::cout << std::endl;
+			sudis::base::HDevInfo hDevInfo = SetupDiGetClassDevsA(&GUID_DEVINTERFACE_DISK,
+				NULL,
+				NULL,
+				DIGCF_PRESENT
+				| DIGCF_ALLCLASSES);
 
-			SP_DEVICE_INTERFACE_DATA deviceInterface = { 0 };
-			deviceInterface.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
-
-			// Перечисление
-			if (!SetupDiEnumDeviceInterfaces(deviceInfoHandle.getRef(), 0, classGuid, deviceIndex, &deviceInterface))
+			for (auto it = result.begin(); it != result.end(); )
 			{
-				std::cout << "End of enum by SetupDiEnumDeviceInterfaces(). errorCode: " << GetLastError() << std::endl;
-				break;
+				SP_DEVINFO_DATA diData;
+				if (!getDiData(hDevInfo, *it, diData))
+					it = result.erase(it);
+				else
+					++it;
 			}
-
-			// Вычисление буфера
-			DWORD cbRequired = 0;
-			SetupDiGetDeviceInterfaceDetailA(
-				deviceInfoHandle.getRef(),
-				&deviceInterface,
-				0,
-				0,
-				&cbRequired,
-				0);
-			if (ERROR_INSUFFICIENT_BUFFER != GetLastError())
-			{
-				std::cerr << "No ERROR_INSUFFICIENT_BUFFER errorCode:" << GetLastError() << std::endl;
-				continue;
-			}
-
-			std::vector<char> buffer(cbRequired, 0);
-			PSP_DEVICE_INTERFACE_DETAIL_DATA deviceInterfaceDetail =
-				(PSP_DEVICE_INTERFACE_DETAIL_DATA)buffer.data();
-			deviceInterfaceDetail->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA);
-			SP_DEVINFO_DATA diData;
-			diData.cbSize = sizeof(SP_DEVINFO_DATA);
-
-			// Повторный вызов для возврата данных в буфер
-			if (!SetupDiGetDeviceInterfaceDetailA(
-				deviceInfoHandle.getRef(),
-				&deviceInterface,
-				deviceInterfaceDetail,
-				cbRequired,
-				&cbRequired,
-				&diData))
-			{
-				std::cerr << "Failed obtain SP_DEVICE_INTERFACE_DETAIL_DATA by SetupDiGetDeviceInterfaceDetailA(). errorCode: " << GetLastError() << std::endl;
-				continue;
-			}
-
-			//diData.
-
-
-			/*Открываем устройство для отправки IOCTL*/
-			HANDLE handle = CreateFile(deviceInterfaceDetail->DevicePath, GENERIC_WRITE, FILE_SHARE_WRITE,
-				0, OPEN_EXISTING, 0, 0);
-
-			if (handle == INVALID_HANDLE_VALUE)
-			{
-				std::cerr << "Failed CreateFile(). errorCode: " << GetLastError() << " continue." << std::endl;
-				continue;
-			}
-
-			getDeviceFromPort(handle, result);
 		}
+
+		/// Заблочен или нет, вернуть свойства
+		//{
+		//	sudis::base::HDevInfo hDevInfo1 = SetupDiGetClassDevsA(&GUID_DEVINTERFACE_USB_DEVICE, NULL, NULL, DIGCF_PRESENT
+		//		| DIGCF_ALLCLASSES);
+		//	for (auto item : result)
+		//	{
+		//		SP_DEVINFO_DATA diData;
+		//		if (getDiData(hDevInfo1, item, diData))
+		//		{
+		//			SP_PROPCHANGE_PARAMS params{ 0 };
+		//			params.ClassInstallHeader.cbSize = sizeof(SP_CLASSINSTALL_HEADER);
+		//			params.ClassInstallHeader.InstallFunction = DIF_PROPERTYCHANGE;
+
+		//			DWORD ClassInstallParamsSize = sizeof(SP_PROPCHANGE_PARAMS);
+		//			DWORD requiredSize = 0;
+		//			auto result = SetupDiGetClassInstallParamsA(hDevInfo1.getRef(), &diData, (PSP_CLASSINSTALL_HEADER)&params, ClassInstallParamsSize, &requiredSize);
+		//			if (result == FALSE)
+		//			{
+		//				std::cerr << "Fail to get SP_PROPCHANGE_PARAMS. errorCode: " << std::hex << GetLastError() << std::endl;
+		//			}
+		//		}
+		//	}
+		//}
 
 		return { true, result };
 	}
@@ -361,12 +387,11 @@ namespace sudis::storage_control
 		return false;
 	}
 
-	void enableDevice(const Device& _device, const bool _enable)
+	void testGetProperties(const Device& _device)
 	{
-		// Пробуем получить хендл XXX_USB_DEVICE а не XXX_USB_HUB
-		const GUID* pDevInterfaceGuid = &GUID_DEVINTERFACE_USB_DEVICE;
-		sudis::base::HDevInfo hDevInfo = SetupDiGetClassDevsA(pDevInterfaceGuid, NULL, NULL, DIGCF_PRESENT
-			//| DIGCF_DEVICEINTERFACE 
+		//sudis::base::HDevInfo hDevInfo = SetupDiGetClassDevsA(&GUID_DEVINTERFACE_DISK, NULL, NULL, DIGCF_PRESENT
+		//	| DIGCF_ALLCLASSES);
+		sudis::base::HDevInfo hDevInfo = SetupDiGetClassDevsA(&GUID_DEVINTERFACE_USB_DEVICE, NULL, NULL, DIGCF_PRESENT
 			| DIGCF_ALLCLASSES);
 		if (hDevInfo.getRef() == INVALID_HANDLE_VALUE)
 		{
@@ -380,30 +405,126 @@ namespace sudis::storage_control
 			std::cerr << "Not found" << std::endl;
 			return;
 		}
+		
+		SP_CLASSINSTALL_HEADER header{ 0 };
+		header.cbSize = sizeof(SP_CLASSINSTALL_HEADER);
+		DWORD requiredSize = 0;
+		//if (!SetupDiSetClassInstallParamsW(hDevInfo.getRef(), &diData, &header, sizeof(SP_CLASSINSTALL_HEADER)))
+		//{
+		//	std::cerr << "Fail to set SP_CLASSINSTALL_HEADER. errorCode: " << std::hex << GetLastError() << std::endl;
+ 	//	}
+		//else
+		//{
+		//	std::cout << "SP_PROPCHANGE_PARAMS success" << std::endl;
+		//}
 
-		SP_PROPCHANGE_PARAMS params { 0 };
-		params.ClassInstallHeader.cbSize = sizeof(SP_CLASSINSTALL_HEADER);
-		params.ClassInstallHeader.InstallFunction = DIF_PROPERTYCHANGE;
-		params.Scope = DICS_FLAG_GLOBAL;
-		params.HwProfile = 0;
-		if (_enable)
-			params.StateChange = DICS_ENABLE;
+		SP_ADDPROPERTYPAGE_DATA AddPropertyPageData{0};
+		ZeroMemory(&AddPropertyPageData, sizeof(SP_ADDPROPERTYPAGE_DATA));
+		AddPropertyPageData.ClassInstallHeader.cbSize = sizeof(SP_CLASSINSTALL_HEADER);
+		AddPropertyPageData.ClassInstallHeader.InstallFunction = DIF_ADDPROPERTYPAGE_ADVANCED;
+		DWORD ClassInstallParamsSize = sizeof(SP_ADDPROPERTYPAGE_DATA);
+		if (!SetupDiGetClassInstallParamsW(hDevInfo.getRef(), &diData, (PSP_CLASSINSTALL_HEADER)&AddPropertyPageData, ClassInstallParamsSize, &requiredSize))
+		{
+			std::cerr << "Fail to get SP_ADDPROPERTYPAGE_DATA. errorCode: " << std::hex << GetLastError() << std::endl;
+		}
 		else
-			params.StateChange = DICS_DISABLE;
-
-		auto result = SetupDiSetClassInstallParamsA(hDevInfo.getRef(), &diData, (PSP_CLASSINSTALL_HEADER)&params, sizeof(params));
-		if (result == false)
 		{
-			std::cerr << "SetupDiSetClassInstallParamsA() failed. code: " << GetLastError() << std::endl;
-			return;
+			std::cout << "SP_PROPCHANGE_PARAMS success" << std::endl;
 		}
 
-		result = SetupDiCallClassInstaller(DIF_PROPERTYCHANGE, hDevInfo.getRef(), &diData);
-		if (result == false)
+		SP_PROPCHANGE_PARAMS params1{ 0 };
+		params1.ClassInstallHeader.cbSize = sizeof(SP_CLASSINSTALL_HEADER);
+		params1.ClassInstallHeader.InstallFunction = DIF_PROPERTYCHANGE;
+		ClassInstallParamsSize = sizeof(SP_PROPCHANGE_PARAMS);
+		requiredSize = 0;
+		if (!SetupDiGetClassInstallParamsW(hDevInfo.getRef(), &diData, (PSP_CLASSINSTALL_HEADER)&params1, ClassInstallParamsSize, &requiredSize))
 		{
-			std::cerr << "SetupDiCallClassInstaller() failed. code: " << GetLastError() << std::endl;
-			return;
+			std::cerr << "Fail to get SP_PROPCHANGE_PARAMS. errorCode: " << std::hex << GetLastError() << std::endl;
 		}
+		else
+		{
+			std::cout << "SP_PROPCHANGE_PARAMS success" << std::endl;
+		}
+	}
+
+	void enableDevice(const Device& _device, const bool _enable)
+	{
+		{
+			sudis::base::HDevInfo hDevInfo = SetupDiGetClassDevsA(&GUID_DEVINTERFACE_USB_DEVICE, NULL, NULL, DIGCF_PRESENT
+				//| DIGCF_DEVICEINTERFACE
+				| DIGCF_ALLCLASSES);
+			if (hDevInfo.getRef() == INVALID_HANDLE_VALUE)
+			{
+				std::cerr << "Failed SetupDiGetClassDevsA(). errorCode: " << GetLastError() << std::endl;
+				return;
+			}
+
+			SP_DEVINFO_DATA diData;
+			if (!getDiData(hDevInfo, _device, diData))
+			{
+				std::cerr << "Not found" << std::endl;
+				return;
+			}
+
+			SP_PROPCHANGE_PARAMS params{ 0 };
+			params.ClassInstallHeader.cbSize = sizeof(SP_CLASSINSTALL_HEADER);
+			params.ClassInstallHeader.InstallFunction = DIF_PROPERTYCHANGE;
+			params.Scope = DICS_FLAG_GLOBAL;
+			params.HwProfile = 0;
+			if (_enable)
+				params.StateChange = DICS_ENABLE;
+			else
+				params.StateChange = DICS_DISABLE;
+
+			auto result = SetupDiSetClassInstallParamsA(hDevInfo.getRef(), &diData, (PSP_CLASSINSTALL_HEADER)&params, sizeof(params));
+			if (result == false)
+			{
+				std::cerr << "SetupDiSetClassInstallParamsA() failed. code: " << GetLastError() << std::endl;
+				return;
+			}
+
+			result = SetupDiCallClassInstaller(DIF_PROPERTYCHANGE, hDevInfo.getRef(), &diData);
+			if (result == false)
+			{
+				std::cerr << "SetupDiCallClassInstaller() failed. code: " << GetLastError() << std::endl;
+				return;
+			}
+		}
+
+		//{
+			//sudis::base::HDevInfo hDevInfo = SetupDiGetClassDevsA(&GUID_DEVINTERFACE_USB_DEVICE, NULL, NULL, DIGCF_PRESENT
+			//	| DIGCF_ALLCLASSES);
+			//if (hDevInfo.getRef() == INVALID_HANDLE_VALUE)
+			//{
+			//	std::cerr << "Failed SetupDiGetClassDevsA(). errorCode: " << GetLastError() << std::endl;
+			//	return;
+			//}
+
+			//SP_DEVINFO_DATA diData;
+			//if (!getDiData(hDevInfo, _device, diData))
+			//{
+			//	std::cerr << "Not found" << std::endl;
+			//	return;
+			//}
+
+			//SP_PROPCHANGE_PARAMS params1{ 0 };
+			//params1.ClassInstallHeader.cbSize = sizeof(SP_CLASSINSTALL_HEADER);
+			//params1.ClassInstallHeader.InstallFunction = DIF_PROPERTYCHANGE;
+			//params1.Scope = DICS_FLAG_GLOBAL;
+			//params1.HwProfile = 0;
+
+			//DWORD ClassInstallParamsSize = sizeof(SP_PROPCHANGE_PARAMS);
+			//DWORD requiredSize = 0;
+			//auto result1 = SetupDiGetClassInstallParamsA(hDevInfo.getRef(), &diData, (PSP_CLASSINSTALL_HEADER)&params1, ClassInstallParamsSize, &requiredSize);
+			//if (result1 == FALSE)
+			//{
+			//	std::cerr << "Fail to get SP_PROPCHANGE_PARAMS. errorCode: " << std::hex << GetLastError() << std::endl;
+			//}
+			//else
+			//{
+			//	std::cout << "SP_PROPCHANGE_PARAMS success" << std::endl;
+			//}
+		//}
 	}
 
 	bool StorageControl::blockDevice(const Device& _device)
@@ -418,101 +539,56 @@ namespace sudis::storage_control
 		return true;
 	}
 
-	DWORD NotifyNewDevices(
-		HCMNOTIFICATION       hNotify,
-		PVOID             Context,
-		CM_NOTIFY_ACTION      Action,
-		PCM_NOTIFY_EVENT_DATA EventData,
-		DWORD                 EventDataSize)
-	{
-		std::cout << std::endl <<  __FUNCTION__ << std::endl;
-		std::cout << "Context: " << (char*)Context << std::endl;
-		std::cout << "Action: " << Action << std::endl;
-		std::cout << "EventDataSize: " << EventDataSize << std::endl;
-		std::cout << "EventGuid: " << fromGuid(EventData->u.DeviceHandle.EventGuid) << std::endl;
-		std::cout << "DataSize: " << EventData->u.DeviceHandle.DataSize << std::endl;
-		//std::cout << "Data: " << std::string((char*)&EventData->u.DeviceHandle.Data[0], EventData->u.DeviceHandle.DataSize) << std::endl;
-		std::cout << "NameOffset: " << EventData->u.DeviceHandle.NameOffset << std::endl;
-		std::cout << "ClassGuid: " << fromGuid(EventData->u.DeviceInterface.ClassGuid) << std::endl;
-		std::cout << "SymbolicLink: " << sudis::base::ws_s(EventData->u.DeviceInterface.SymbolicLink) << std::endl;
-		std::cout << "DeviceInstance: " << sudis::base::ws_s( EventData->u.DeviceInstance.InstanceId) << std::endl;
-		std::cout << "FilterType: " << EventData->FilterType << std::endl;
-
-		return ERROR_SUCCESS;
-	}
-
 	DWORD NotifyBlockedDevices(
-		HCMNOTIFICATION       hNotify,
-		PVOID             Context,
-		CM_NOTIFY_ACTION      Action,
-		PCM_NOTIFY_EVENT_DATA EventData,
-		DWORD                 EventDataSize)
+		HCMNOTIFICATION			_hNotify,
+		PVOID					_context,
+		CM_NOTIFY_ACTION		_action,
+		PCM_NOTIFY_EVENT_DATA	_eventData,
+		DWORD					_eventDataSize)
 	{
+		/// Фильтрация по USB устройствам
 		GUID expectedGuid = { 0x00530055L, 0x0042, 0x005C, { 0x56, 0x00, 0x49, 0x00, 0x44, 0x00, 0x5F, 0x00 } };
-
-		if (EventData->u.DeviceInterface.ClassGuid == expectedGuid)
+		if (_eventData->u.DeviceInterface.ClassGuid == expectedGuid)
 		{
 			std::cout << std::endl << __FUNCTION__ << std::endl;
-			std::cout << "Context: " << (char*)Context << std::endl;
-			std::cout << "Action: " << Action << std::endl;
-			std::cout << "EventDataSize: " << EventDataSize << std::endl;
-			std::cout << "EventGuid: " << fromGuid(EventData->u.DeviceHandle.EventGuid) << std::endl;
-			std::cout << "DataSize: " << EventData->u.DeviceHandle.DataSize << std::endl;
+			//std::cout << "Context: " << (char*)Context << std::endl;
+			std::cout << "Action: " << _action << std::endl;
+			std::cout << "EventDataSize: " << _eventDataSize << std::endl;
+			std::cout << "EventGuid: " << fromGuid(_eventData->u.DeviceHandle.EventGuid) << std::endl;
+			std::cout << "DataSize: " << _eventData->u.DeviceHandle.DataSize << std::endl;
 			//std::cout << "Data: " << std::string((char*)&EventData->u.DeviceHandle.Data[0], EventData->u.DeviceHandle.DataSize) << std::endl;
-			std::cout << "NameOffset: " << EventData->u.DeviceHandle.NameOffset << std::endl;
-			std::cout << "ClassGuid: " << fromGuid(EventData->u.DeviceInterface.ClassGuid) << std::endl;
-			std::cout << "SymbolicLink: " << sudis::base::ws_s(EventData->u.DeviceInterface.SymbolicLink) << std::endl;
-			std::cout << "DeviceInstance: " << sudis::base::ws_s(EventData->u.DeviceInstance.InstanceId) << std::endl;
-			std::cout << "FilterType: " << EventData->FilterType << std::endl;
+			std::cout << "NameOffset: " << _eventData->u.DeviceHandle.NameOffset << std::endl;
+			std::cout << "ClassGuid: " << fromGuid(_eventData->u.DeviceInterface.ClassGuid) << std::endl;
+			std::cout << "SymbolicLink: " << sudis::base::ws_s(_eventData->u.DeviceInterface.SymbolicLink) << std::endl;
+			std::cout << "DeviceInstance: " << sudis::base::ws_s(_eventData->u.DeviceInstance.InstanceId) << std::endl;
+			std::cout << "FilterType: " << _eventData->FilterType << std::endl;
 
-			HDEVINFO hDevInfo = SetupDiCreateDeviceInfoList(&EventData->u.DeviceInterface.ClassGuid, NULL);
-			if (INVALID_HANDLE_VALUE == hDevInfo)
-				std::cerr << "failed obtain hDevInfo" << std::endl;
-
-			SP_DEVINFO_DATA diData;
-			if (!SetupDiCreateDeviceInfoA(hDevInfo,
-				sudis::base::ws_s(EventData->u.DeviceInstance.InstanceId).c_str(),
-				&EventData->u.DeviceInterface.ClassGuid,
-				NULL,
-				NULL,
-				DICD_GENERATE_ID,
-				&diData))
+			if (_context)
 			{
-				std::cerr << "Failed obtain SP_DEVINFO_DATA. errorCode: " << GetLastError() << std::endl;
+				StorageControl* obj = (StorageControl*)_context;
+				DevInst inst;
+				inst.m_instanceId = sudis::base::ws_s(_eventData->u.DeviceInstance.InstanceId);
+				if (_action == CM_NOTIFY_ACTION_DEVICEINSTANCEENUMERATED)
+					inst.m_action = Actions::ACTION_DEVICEINSTANCEENUMERATED;
+				else if (_action == CM_NOTIFY_ACTION_DEVICEINSTANCESTARTED)
+					inst.m_action = Actions::ACTION_DEVICEINSTANCESTARTED;
+				else
+				{
+					std::cerr << "Unknown action: " << _action << std::endl;
+					return ERROR_SUCCESS;		/// Всегда возвращать Success
+				}
+				obj->addDevice2Queue(inst);		/// Добавление события в очередь
 			}
+			else
+				std::cerr << "Context is invalid" << std::endl;
+
 		}
 
 		return ERROR_SUCCESS;
 	}
 
-	void registerNewDevicesEvent()
+	void StorageControl::registerDevicesEvent()
 	{
-		CM_NOTIFY_FILTER NotifyFilter = { 0 };
-		NotifyFilter.cbSize = sizeof(NotifyFilter);
-		NotifyFilter.FilterType = CM_NOTIFY_FILTER_TYPE_DEVICEINTERFACE;
-		NotifyFilter.u.DeviceInterface.ClassGuid = GUID_DEVINTERFACE_USB_DEVICE;
-
-		PCM_NOTIFY_CALLBACK callback = NotifyNewDevices;
-		HCMNOTIFICATION notifyContext;
-		auto res = CM_Register_Notification(
-			&NotifyFilter,
-			(PVOID)"NewDevices",
-			callback,
-			&notifyContext);
-
-		if (res == CR_SUCCESS)
-			std::cout << "Successing callback registered" << std::endl;
-		else
-		{
-			std::cerr << "Failed register callback. errorCode: " << GetLastError() << " res: " << res << std::endl;
-		}
-	}
-
-	void registerBlockedDevicesEvent()
-	{
-		// GUID класса флешек
-		// {36fc9e60 - c465 - 11cf - 8056 - 444553540000}
-
 		CM_NOTIFY_FILTER NotifyFilter = { 0 };
 		NotifyFilter.cbSize = sizeof(NotifyFilter);
 		NotifyFilter.FilterType = CM_NOTIFY_FILTER_TYPE_DEVICEINSTANCE;
@@ -522,7 +598,7 @@ namespace sudis::storage_control
 		HCMNOTIFICATION notifyContext;
 		auto res = CM_Register_Notification(
 			&NotifyFilter,
-			(PVOID)"Blocked Devices",
+			(PVOID)this,
 			callback,
 			&notifyContext);
 
@@ -534,10 +610,22 @@ namespace sudis::storage_control
 		}
 	}
 
-	void StorageControl::registerPlugEvent()
+	void StorageControl::registerPlugEvent(std::function<void(Device& _device)> _callback)
 	{
-		//registerNewDevicesEvent();
-		registerBlockedDevicesEvent();
+		m_newDeviceCallback = _callback;
+		registerDevicesEvent();
+
+		Thread::start();
+	}
+
+	void StorageControl::addDevice2Queue(const DevInst& _inst)
+	{
+		/// Если не задали колбек то и смысла что-то добавлять в очередь нет
+		if (!m_newDeviceCallback)
+			return;
+
+		std::unique_lock lk(m_devQMutex);
+		m_devQueue.push_back(_inst);
 	}
 
 	void StorageControl::init()
@@ -556,6 +644,42 @@ namespace sudis::storage_control
 
 	bool StorageControl::run()
 	{
+		/// Если функтор не задали, то нет смысла дальше производить обработку
+		if (!m_newDeviceCallback)
+			return true;
+
+		DevInst inst;
+
+		/// Потокобезопасное извлечение из очереди
+		{
+			std::unique_lock lk(m_devQMutex);	// ждем короткий миг. предложение: избавиться от мьютекса, использовать lock free двустороннюю очередь 
+			if (m_devQueue.empty())
+				return true;
+			inst = m_devQueue.front();
+			m_devQueue.pop_front();
+		}
+
+		/// Сопоставление instanceId с PID, VID, Serial
+		auto [res, devList] = getDevices();
+		if (!res)
+		{
+			std::cerr << "Empty list of USB storages" << std::endl;
+			return true;
+		}
+		for (auto& item : devList)
+		{
+			std::string PID = toUpper(item.m_pid);
+			std::string VID = toUpper(item.m_vid);
+			std::string SERIAL = toUpper(item.m_serial);
+
+			std::string instanceId = toUpper(inst.m_instanceId);
+
+			if (instanceId.find(PID) != std::string::npos &&
+				instanceId.find(VID) != std::string::npos &&
+				instanceId.find(SERIAL) != std::string::npos)
+				
+				m_newDeviceCallback(item);
+		}
 
 		return true;
 	}
