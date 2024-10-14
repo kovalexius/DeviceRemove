@@ -298,6 +298,19 @@ namespace sudis::storage_control
 			}
 		}
 
+		/// Заблочен или нет, проэнумить.
+		sudis::base::HDevInfo hDevInfo1 = SetupDiGetClassDevsA(&GUID_DEVINTERFACE_USB_DEVICE, NULL, NULL,
+			DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);			// Только подключенные устройства, заблоченные в энумератор не попадут
+		for (auto& item : result)
+		{
+			SP_DEVINFO_DATA diData;
+			if (getDiData(hDevInfo1, item, diData)) // Если нашлось, значит разблочено
+				item.m_isBlocked = false;
+			else
+				item.m_isBlocked = true;		// А если не нашлось значит заблочено
+		}
+
+
 		/// Заблочен или нет, вернуть свойства
 		//{
 		//	sudis::base::HDevInfo hDevInfo1 = SetupDiGetClassDevsA(&GUID_DEVINTERFACE_USB_DEVICE, NULL, NULL, DIGCF_PRESENT
@@ -449,46 +462,44 @@ namespace sudis::storage_control
 
 	void enableDevice(const Device& _device, const bool _enable)
 	{
+		sudis::base::HDevInfo hDevInfo = SetupDiGetClassDevsA(&GUID_DEVINTERFACE_USB_DEVICE, NULL, NULL, DIGCF_PRESENT
+			//| DIGCF_DEVICEINTERFACE
+			| DIGCF_ALLCLASSES);
+		if (hDevInfo.getRef() == INVALID_HANDLE_VALUE)
 		{
-			sudis::base::HDevInfo hDevInfo = SetupDiGetClassDevsA(&GUID_DEVINTERFACE_USB_DEVICE, NULL, NULL, DIGCF_PRESENT
-				//| DIGCF_DEVICEINTERFACE
-				| DIGCF_ALLCLASSES);
-			if (hDevInfo.getRef() == INVALID_HANDLE_VALUE)
-			{
-				std::cerr << "Failed SetupDiGetClassDevsA(). errorCode: " << GetLastError() << std::endl;
-				return;
-			}
+			std::cerr << "Failed SetupDiGetClassDevsA(). errorCode: " << GetLastError() << std::endl;
+			return;
+		}
 
-			SP_DEVINFO_DATA diData;
-			if (!getDiData(hDevInfo, _device, diData))
-			{
-				std::cerr << "Not found" << std::endl;
-				return;
-			}
+		SP_DEVINFO_DATA diData;
+		if (!getDiData(hDevInfo, _device, diData))
+		{
+			std::cerr << "Not found" << std::endl;
+			return;
+		}
 
-			SP_PROPCHANGE_PARAMS params{ 0 };
-			params.ClassInstallHeader.cbSize = sizeof(SP_CLASSINSTALL_HEADER);
-			params.ClassInstallHeader.InstallFunction = DIF_PROPERTYCHANGE;
-			params.Scope = DICS_FLAG_GLOBAL;
-			params.HwProfile = 0;
-			if (_enable)
-				params.StateChange = DICS_ENABLE;
-			else
-				params.StateChange = DICS_DISABLE;
+		SP_PROPCHANGE_PARAMS params{ 0 };
+		params.ClassInstallHeader.cbSize = sizeof(SP_CLASSINSTALL_HEADER);
+		params.ClassInstallHeader.InstallFunction = DIF_PROPERTYCHANGE;
+		params.Scope = DICS_FLAG_GLOBAL;
+		params.HwProfile = 0;
+		if (_enable)
+			params.StateChange = DICS_ENABLE;
+		else
+			params.StateChange = DICS_DISABLE;
 
-			auto result = SetupDiSetClassInstallParamsA(hDevInfo.getRef(), &diData, (PSP_CLASSINSTALL_HEADER)&params, sizeof(params));
-			if (result == false)
-			{
-				std::cerr << "SetupDiSetClassInstallParamsA() failed. code: " << GetLastError() << std::endl;
-				return;
-			}
+		auto result = SetupDiSetClassInstallParamsA(hDevInfo.getRef(), &diData, (PSP_CLASSINSTALL_HEADER)&params, sizeof(params));
+		if (result == false)
+		{
+			std::cerr << "SetupDiSetClassInstallParamsA() failed. code: " << GetLastError() << std::endl;
+			return;
+		}
 
-			result = SetupDiCallClassInstaller(DIF_PROPERTYCHANGE, hDevInfo.getRef(), &diData);
-			if (result == false)
-			{
-				std::cerr << "SetupDiCallClassInstaller() failed. code: " << GetLastError() << std::endl;
-				return;
-			}
+		result = SetupDiCallClassInstaller(DIF_PROPERTYCHANGE, hDevInfo.getRef(), &diData);
+		if (result == false)
+		{
+			std::cerr << "SetupDiCallClassInstaller() failed. code: " << GetLastError() << std::endl;
+			return;
 		}
 
 		//{

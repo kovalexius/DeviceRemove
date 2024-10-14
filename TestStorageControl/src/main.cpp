@@ -41,22 +41,22 @@ int main()
 	//std::this_thread::sleep_for(std::chrono::seconds(10));
 
 	sudis::storage_control::StorageControl devControl;
-	auto [res, devList] = devControl.getDevices();
+	//auto [res, devList] = devControl.getDevices();
 
-	if (res)
-	{
-		for (const auto& device : devList)
-		{
-			std::cout << "Device is " << (device.m_isBlocked ? "blocked" : "unblocked") <<
-				" PID: " << device.m_pid <<
-				" VID: " << device.m_vid <<
-				" serial: " << device.m_serial << std::endl;
-			//devControl.blockDevice(device);
-			sudis::storage_control::testGetProperties(device);
-		}
-	}
+	//if (res)
+	//{
+	//	for (const auto& device : devList)
+	//	{
+	//		std::cout << "Device is " << (device.m_isBlocked ? "blocked" : "unblocked") <<
+	//			" PID: " << device.m_pid <<
+	//			" VID: " << device.m_vid <<
+	//			" serial: " << device.m_serial << std::endl;
+	//		//devControl.blockDevice(device);
+	//		//sudis::storage_control::testGetProperties(device);
+	//	}
+	//}
 	
-	//devControl.registerPlugEvent(callback);
+	devControl.registerPlugEvent(callback);
 
 	//test();
 
